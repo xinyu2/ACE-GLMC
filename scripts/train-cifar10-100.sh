@@ -1,0 +1,2 @@
+python main.py --dataset cifar10 -a resnet32 --num_classes 10 --imbanlance_rate 0.01 --beta 0.5 --lr 0.01 --epochs 2 -b 64 --momentum 0.9 --weight_decay 5e-3 --resample_weighting 0.0 --label_weighting 1.2 --contrast_weight 1
+python test.py --dataset cifar10 -a resnet32 --num_classes 10 --imbanlance_rate 0.01 --resume=./output/cifar10-resnet32-im0.01-10-26-113412/ckpt.best.pth.tar

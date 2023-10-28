@@ -1,0 +1,2 @@
+2023-10-26 17:46:49,537 EPOCH: 1 val Results: Prec@1 11.140 Prec@5 49.110
+2023-10-26 17:47:48,746 EPOCH: 2 val Results: Prec@1 23.400 Prec@5 73.830
