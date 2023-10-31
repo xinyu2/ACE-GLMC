@@ -6,13 +6,16 @@ from utils.util import *
 from model import ResNet_cifar
 from model import Resnet_LT
 from imbalance_data import cifar10Imbanlance,cifar100Imbanlance,dataset_lt_data
+from sklearn.metrics import confusion_matrix
 
-
-def validate(model,val_loader,args):
+def validate(model, val_loader, cls_num_list, args):
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
+    eps = np.finfo(np.float64).eps
     # switch to evaluate mode
     model.eval()
+    all_preds = []
+    all_targets = []
     with torch.no_grad():
         for i, (input, target) in enumerate(val_loader):
             input = input.cuda()
@@ -21,11 +24,29 @@ def validate(model,val_loader,args):
             output = model(input, train=False)
             # measure accuracy
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            _, pred = torch.max(output, 1)
+            all_preds.extend(pred.cpu().numpy())
+            all_targets.extend(target.cpu().numpy())
 
             top1.update(acc1.item(), input.size(0))
             top5.update(acc5.item(), input.size(0))
             output = 'Testing:  ' + str(i) + ' Prec@1:  ' + str(top1.val) + ' Prec@5:  ' + str(top5.val)
             print(output, end="\r")
+        cf = confusion_matrix(all_targets, all_preds).astype(float)
+        cls_cnt = cf.sum(axis=1)
+        cls_hit = np.diag(cf)
+        cls_acc = cls_hit / cls_cnt
+        out_cls_acc = '%s Class Accuracy: %s' % (
+        'val', (np.array2string(cls_acc, separator=',', formatter={'float_kind': lambda x: "%.3f" % x})))
+
+        many_shot = cls_num_list > 100
+        medium_shot = (cls_num_list <= 100) & (cls_num_list > 20)
+        few_shot = cls_num_list <= 20
+        print("many avg, med avg, few avg",
+              float(sum(cls_acc[many_shot]) * 100 / (sum(many_shot) + eps)),
+              float(sum(cls_acc[medium_shot]) * 100 / (sum(medium_shot) + eps)),
+              float(sum(cls_acc[few_shot]) * 100 / (sum(few_shot) + eps))
+              )    
         output = ('{flag} Results: Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(flag='val', top1=top1, top5=top5))
         print(output)
 
@@ -48,28 +69,32 @@ def get_model(args):
 def get_dataset(args):
     _,transform_val = util.get_transform(args.dataset)
     if args.dataset == 'cifar10':
+        trainset = cifar10Imbanlance.Cifar10Imbanlance(imbanlance_rate=args.imbanlance_rate, train=True, transform=transform_val,file_path=os.path.join(args.root))
         testset = cifar10Imbanlance.Cifar10Imbanlance(imbanlance_rate=args.imbanlance_rate, train=False, transform=transform_val,file_path=os.path.join(args.root))
         print("load cifar10")
-        return testset
+        return trainset,testset
 
     if args.dataset == 'cifar100':
+        trainset = cifar100Imbanlance.Cifar100Imbanlance(imbanlance_rate=args.imbanlance_rate, train=True, transform=transform_val,file_path=os.path.join(args.root,'cifar-100-python/'))
         testset = cifar100Imbanlance.Cifar100Imbanlance(imbanlance_rate=args.imbanlance_rate, train=False, transform=transform_val,file_path=os.path.join(args.root,'cifar-100-python/'))
         print("load cifar100")
-        return testset
+        return trainset,testset
 
     if args.dataset == 'ImageNet-LT':
+        trainset = dataset_lt_data.LT_Dataset(args.root, args.dir_train_txt, transform_val)
         testset = dataset_lt_data.LT_Dataset(args.root, args.dir_test_txt, transform_val)
         print("load ImageNet-LT")
-        return testset
+        return trainset,testset
 
     if args.dataset == 'iNaturelist2018':
-        testset = dataset_lt_data.LT_Dataset(args.root, args.dir_test_txt,transform_val)
+        trainset = dataset_lt_data.LT_Dataset(args.root, args.dir_train_txt, transform_val)
+        testset = dataset_lt_data.LT_Dataset(args.root, args.dir_test_txt, transform_val)
         print("load iNaturelist2018")
-        return testset
+        return trainset,testset
 
 def main():
     args = parser.parse_args()
-
+    num_classes = args.num_classes
     if args.gpu is not None:
         print("Use GPU: {} for testing".format(args.gpu))
     # create model
@@ -91,14 +116,18 @@ def main():
         print("=> no checkpoint found at '{}'".format(args.resume))
 
     # Data loading code
-    val_dataset = get_dataset(args)
+    train_dataset, val_dataset = get_dataset(args)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,num_workers=args.workers, pin_memory=True)
 
+    cls_num_list = [0] * num_classes
+    for label in train_dataset.targets:
+        cls_num_list[label] += 1
+    cls_num_list = np.array(cls_num_list)
 
     print("Testing started!")
     # switch to evaluate mode
     model.eval()
-    validate(model, val_loader, args)
+    validate(model, val_loader, cls_num_list, args)
 
 if __name__ == '__main__':
     # test set
