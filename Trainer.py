@@ -40,6 +40,7 @@ class Trainer(object):
         self.lambdas = [args.L1, args.L2, args.L3]
         self.f0 = args.f0
         self.mask = self.get_mask()
+        print(f"mask={self.mask}")
         self.update_weight()
 
     def update_weight(self):
@@ -129,14 +130,16 @@ class Trainer(object):
                 # loss_cut = -torch.mean(torch.sum(F.log_softmax(output_2, dim=1) * mixcut_y, dim=1))
                 # loss_mix_w = -torch.mean(torch.sum(F.log_softmax(output_cb_1, dim=1) * mixup_y_w, dim=1))
                 # loss_cut_w = -torch.mean(torch.sum(F.log_softmax(output_cb_2, dim=1) * cutmix_y_w, dim=1))
-                # loss_mix = self.mixupLoss(output_1, mixup_y)
-                # loss_cut = self.mixupLoss(output_2, mixcut_y)
-                # loss_mix_w = self.mixupLoss(output_cb_1, mixup_y_w)
-                # loss_cut_w = self.mixupLoss(output_cb_2, cutmix_y_w)
-                loss_mix = self.mixupACE1(output_1, mixup_y)
-                loss_cut = self.mixupACE1(output_2, mixcut_y)
-                loss_mix_w = self.mixupACE1(output_cb_1, mixup_y_w)
-                loss_cut_w = self.mixupACE1(output_cb_2, cutmix_y_w)
+                if self.args.lossfn == 'ori':
+                    loss_mix = self.mixupLoss(output_1, mixup_y)
+                    loss_cut = self.mixupLoss(output_2, mixcut_y)
+                    loss_mix_w = self.mixupLoss(output_cb_1, mixup_y_w)
+                    loss_cut_w = self.mixupLoss(output_cb_2, cutmix_y_w)
+                elif self.args.lossfn == 'ace':
+                    loss_mix = self.mixupACE1(output_1, mixup_y)
+                    loss_cut = self.mixupACE1(output_2, mixcut_y)
+                    loss_mix_w = self.mixupACE1(output_cb_1, mixup_y_w)
+                    loss_cut_w = self.mixupACE1(output_cb_2, cutmix_y_w)
 
                 balance_loss = loss_mix + loss_cut
                 rebalance_loss = loss_mix_w + loss_cut_w

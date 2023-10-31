@@ -66,7 +66,13 @@ def main():
     args = parser.parse_args()
     print(args)
     curr_time = datetime.datetime.now()
-    args.store_name = ''.join([args.dataset, args.arch,str(args.imbanlance_rate)
+    lam1 = args.L1
+    lam2 = args.L2
+    lam3 = args.L3
+    f0 = args.f0
+    parms = [lam1, lam2, lam3, f0]
+    parmstr = "-".join([str(p) for p in parms])
+    args.store_name = ''.join([args.dataset, args.arch,str(args.imbanlance_rate), parmstr
             ,datetime.datetime.strftime(curr_time, '%m-%d-%H%M%S')])
     prepare_folders(args)
     if args.seed is not None:
@@ -171,6 +177,7 @@ if __name__ == '__main__':
     parser.add_argument('--resample_weighting', default=0.2, type=float,help='weighted for sampling probability (q(1,k))')
     parser.add_argument('--label_weighting', default=1.0, type=float, help='weighted for Loss')
     parser.add_argument('--contrast_weight', default=10,type=int,help='Mixture Consistency  Weights')
+    parser.add_argument('--lossfn', default='ce',type=str,help='loss-function (ori, ace)')
     parser.add_argument('--L1', default=0.0,type=float,help='lambda1-of-ace1')
     parser.add_argument('--L2', default=0.0,type=float,help='lambda2-of-ace1')
     parser.add_argument('--L3', default=0.0,type=float,help='lambda3-of-ace1')
