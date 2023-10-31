@@ -177,7 +177,7 @@ if __name__ == '__main__':
     parser.add_argument('--resample_weighting', default=0.2, type=float,help='weighted for sampling probability (q(1,k))')
     parser.add_argument('--label_weighting', default=1.0, type=float, help='weighted for Loss')
     parser.add_argument('--contrast_weight', default=10,type=int,help='Mixture Consistency  Weights')
-    parser.add_argument('--lossfn', default='ce',type=str,help='loss-function (ori, ace)')
+    parser.add_argument('--lossfn', default='ace',type=str,help='loss-function (ori, ace)')
     parser.add_argument('--L1', default=0.0,type=float,help='lambda1-of-ace1')
     parser.add_argument('--L2', default=0.0,type=float,help='lambda2-of-ace1')
     parser.add_argument('--L3', default=0.0,type=float,help='lambda3-of-ace1')
