@@ -133,10 +133,12 @@ def main_worker(gpu, args):
     logger.addHandler(fh)
 
     # Data loading code
+    t0 = time.time()
     train_dataset,val_dataset = get_dataset(args)
     num_classes = len(np.unique(train_dataset.targets))
     assert num_classes == args.num_classes
-
+    t1 = time.time()
+    print(f">> data load time= {(t1 - t0)} seconds")
     cls_num_list = train_dataset.get_per_class_num()
     train_sampler = None
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),num_workers=args.workers, persistent_workers=True,pin_memory=True, sampler=train_sampler)
