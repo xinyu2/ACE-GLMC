@@ -53,13 +53,17 @@ def get_dataset(args):
         return trainset,testset
 
     if args.dataset == 'ImageNet-LT':
-        trainset = dataset_lt_data.LT_Dataset(args.root, args.dir_train_txt,util.TwoCropTransform(transform_train))
-        testset = dataset_lt_data.LT_Dataset(args.root, args.dir_test_txt,transform_val)
+        dir_train_txt = os.path.join(args.root, 'data_txt', 'ImageNet_LT_train.txt')
+        dir_test_txt = os.path.join(args.root, 'data_txt', 'ImageNet_LT_test.txt')
+        trainset = dataset_lt_data.LT_Dataset(args.root, dir_train_txt,util.TwoCropTransform(transform_train))
+        testset = dataset_lt_data.LT_Dataset(args.root, dir_test_txt,transform_val)
         return trainset,testset
 
     if args.dataset == 'iNaturelist2018':
-        trainset = dataset_lt_data.LT_Dataset(args.root, args.dir_train_txt,util.TwoCropTransform(transform_train))
-        testset = dataset_lt_data.LT_Dataset(args.root, args.dir_test_txt,transform_val)
+        dir_train_txt = os.path.join(args.root, 'data_txt', 'iNaturalist18_train.txt')
+        dir_test_txt = os.path.join(args.root, 'data_txt', 'iNaturalist18_val.txt')
+        trainset = dataset_lt_data.LT_Dataset(args.root, dir_train_txt,util.TwoCropTransform(transform_train))
+        testset = dataset_lt_data.LT_Dataset(args.root, dir_test_txt,transform_val)
         return trainset,testset
 
 def main():
