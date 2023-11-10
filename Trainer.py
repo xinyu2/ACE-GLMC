@@ -59,8 +59,20 @@ class Trainer(object):
                 mask[k,k] = self.lambdas[2]
         return mask
             
-    def train(self):
+    def train(self, optim_state):
         best_acc1 = 0
+        # ========================
+        # resume optimizer.lr 
+        # ========================
+        if optim_state is not None:
+            self.optimizer.load_state_dict(optim_state)
+        elif self.args.resume is not None:
+            if self.args.dataset == 'ImageNet-LT' or self.args.dataset == 'iNaturelist2018':
+                self.paco_adjust_learning_rate(self.optimizer, self.args.start_epoch - 1, self.args)
+            else:
+                for _ in range(self.args.start_epoch - 1):
+                    self.train_scheduler.step()
+
         for epoch in range(self.start_epoch, self.epochs):
             alpha = 1 - (epoch / self.epochs) ** 2
             batch_time = AverageMeter('Time', ':6.3f')
@@ -178,6 +190,7 @@ class Trainer(object):
             save_checkpoint(self.args, {
                 'epoch': epoch + 1,
                 'state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
                 'best_acc1':  best_acc1,
             }, is_best, epoch + 1)
 
@@ -289,6 +302,7 @@ class Trainer(object):
             lr *= 0.5 * (1. + math.cos(math.pi * (epoch - warmup_epochs + 1) / (self.epochs - warmup_epochs + 1)))
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
+        print(f"{epoch} lr = {lr}")    
 
 
 

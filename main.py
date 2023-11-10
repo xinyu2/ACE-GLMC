@@ -5,6 +5,7 @@ import argparse
 import torch
 import torch.nn as nn
 import numpy as np
+from collections import OrderedDict
 import random
 from torch.backends import cudnn
 import torch.nn.functional as F
@@ -112,6 +113,7 @@ def main_worker(gpu, args):
         model = torch.nn.DataParallel(model).cuda()
 
     # optionally resume from a checkpoint
+    optim_state = None
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
@@ -121,7 +123,17 @@ def main_worker(gpu, args):
             if args.gpu is not None:
                 # best_acc1 may be from a checkpoint from a different GPU
                 best_acc1 = best_acc1.to(args.gpu)
-            model.load_state_dict(checkpoint['state_dict'])
+            # model.load_state_dict(checkpoint['state_dict'])
+            state_dict = checkpoint['state_dict']
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                if 'module' not in k:
+                    k = 'module.'+k
+                else:
+                    k = k.replace('features.module.', 'module.features.')
+                new_state_dict[k]=v
+            model.load_state_dict(new_state_dict)
+            optim_state = checkpoint.get('optimizer_state_dict', None)
             print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
@@ -141,8 +153,13 @@ def main_worker(gpu, args):
     print(f">> data load time= {(t1 - t0)} seconds")
     cls_num_list = train_dataset.get_per_class_num()
     train_sampler = None
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),num_workers=args.workers, persistent_workers=True,pin_memory=True, sampler=train_sampler)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,num_workers=args.workers, persistent_workers=True,pin_memory=True)
+    drop_last = False
+    if args.dataset == 'iNaturelist2018':
+        drop_last = True
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),\
+                                               num_workers=args.workers, persistent_workers=True,pin_memory=True, sampler=train_sampler, drop_last=drop_last)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,\
+                                             num_workers=args.workers, persistent_workers=True,pin_memory=True, drop_last=drop_last)
 
     cls_num_list = [0] * num_classes
     for label in train_dataset.targets:
@@ -158,13 +175,14 @@ def main_worker(gpu, args):
     samples_weight = torch.from_numpy(samples_weight)
     samples_weight = samples_weight.double()
     weighted_sampler = torch.utils.data.WeightedRandomSampler(samples_weight, len(samples_weight),replacement=True)
-    weighted_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size,num_workers=args.workers, persistent_workers=True,pin_memory=True,sampler=weighted_sampler)
+    weighted_train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size,num_workers=args.workers, \
+                                                        persistent_workers=True,pin_memory=True,sampler=weighted_sampler, drop_last=drop_last)
 
     cls_num_list_cuda = torch.from_numpy(np.array(cls_num_list)).float().cuda()
     start_time = time.time()
     print("Training started!")
     trainer = Trainer(args, model=model,train_loader=train_loader, val_loader=val_loader,weighted_train_loader=weighted_train_loader, per_class_num=train_cls_num_list,log=logging)
-    trainer.train()
+    trainer.train(optim_state)
     end_time = time.time()
     print("It took {} to execute the program".format(hms_string(end_time - start_time)))
 
@@ -192,11 +210,11 @@ if __name__ == '__main__':
     parser.add_argument('--f0', default=0.0,type=float,help='f0-of-ace1')
     # etc.
     parser.add_argument('--seed', default=3407, type=int, help='seed for initializing training. ')
-    parser.add_argument('-p', '--print_freq', default=1000, type=int, metavar='N',help='print frequency (default: 100)')
+    parser.add_argument('-p', '--print_freq', default=100, type=int, metavar='N',help='print frequency (default: 100)')
     parser.add_argument('--gpu', default=None, type=int,help='GPU id to use.')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',help='number of data loading workers (default: 4)')
     parser.add_argument('--resume', default=None, type=str, metavar='PATH',help='path to latest checkpoint (default: none)')
-    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',help='manual epoch number (useful on restarts)')
+    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',help='manual epoch number (useful on restarts)')
     parser.add_argument('--root_log', type=str, default='./output/')
     parser.add_argument('--root_model', type=str, default='./output/')
     parser.add_argument('--store_name', type=str, default='./output/')
