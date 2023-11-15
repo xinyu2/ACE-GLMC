@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 import random
 from torch.backends import cudnn
+from torchvision.ops import box_convert
 import torch.nn.functional as F
 from utils import util
 from utils.util import *
@@ -135,6 +136,137 @@ class Trainer(object):
                 output_1, output_cb_1, z1, p1 = self.model(mix_x, train=True)
                 output_2, output_cb_2, z2, p2 = self.model(cut_x, train=True)
                 contrastive_loss = self.SimSiamLoss(p1, z2) + self.SimSiamLoss(p2, z1)
+                if self.args.lossfn == 'ori':
+                    loss_mix = self.mixupLoss(output_1, mixup_y)
+                    loss_cut = self.mixupLoss(output_2, mixcut_y)
+                    loss_mix_w = self.mixupLoss(output_cb_1, mixup_y_w)
+                    loss_cut_w = self.mixupLoss(output_cb_2, cutmix_y_w)
+                elif self.args.lossfn == 'ace':
+                    loss_mix = self.mixupACE1(output_1, mixup_y)
+                    loss_cut = self.mixupACE1(output_2, mixcut_y)
+                    loss_mix_w = self.mixupACE1(output_cb_1, mixup_y_w)
+                    loss_cut_w = self.mixupACE1(output_cb_2, cutmix_y_w)
+
+                balance_loss = loss_mix + loss_cut
+                rebalance_loss = loss_mix_w + loss_cut_w
+
+                loss = alpha * balance_loss + (1 - alpha) * rebalance_loss + self.contrast_weight * contrastive_loss
+
+                losses.update(loss.item(), inputs[0].size(0))
+
+                # compute gradient and do SGD step
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+                if i % self.print_freq == 0:
+                    output = ('Epoch: [{0}/{1}][{2}/{3}]\t'
+                              'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                              'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                              'Loss {loss.val:.4f} ({loss.avg:.4f})'.format(
+                        epoch + 1, self.epochs, i, len(self.train_loader), batch_time=batch_time,
+                    data_time=data_time, loss=losses))  # TODO
+                    print(output)
+                    # evaluate on validation set
+            acc1 = self.validate(epoch=epoch)
+            if self.args.dataset == 'ImageNet-LT' or self.args.dataset == 'iNaturelist2018':
+                self.paco_adjust_learning_rate(self.optimizer, epoch, self.args)
+            else:
+                self.train_scheduler.step()
+            # remember best acc@1 and save checkpoint
+            is_best = acc1 > best_acc1
+            best_acc1 = max(acc1,  best_acc1)
+            output_best = 'Best Prec@1: %.3f\n' % (best_acc1)
+            print(output_best)
+            save_checkpoint(self.args, {
+                'epoch': epoch + 1,
+                'state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'best_acc1':  best_acc1,
+            }, is_best, epoch + 1)
+
+    def train_box(self, optim_state):
+        best_acc1 = 0
+        # ========================
+        # resume optimizer.lr 
+        # ========================
+        if optim_state is not None:
+            self.optimizer.load_state_dict(optim_state)
+        elif self.args.resume is not None:
+            if self.args.dataset == 'ImageNet-LT' or self.args.dataset == 'iNaturelist2018':
+                self.paco_adjust_learning_rate(self.optimizer, self.args.start_epoch - 1, self.args)
+            else:
+                for _ in range(self.args.start_epoch - 1):
+                    self.train_scheduler.step()
+
+        for epoch in range(self.start_epoch, self.epochs):
+            alpha = 1 - (epoch / self.epochs) ** 2
+            batch_time = AverageMeter('Time', ':6.3f')
+            data_time = AverageMeter('Data', ':6.3f')
+            losses = AverageMeter('Loss', ':.4e')
+            top1 = AverageMeter('Acc@1', ':6.2f')
+            top5 = AverageMeter('Acc@5', ':6.2f')
+
+            # switch to train mode
+            self.model.train()
+            end = time.time()
+            weighted_train_loader = iter(self.weighted_train_loader)
+
+            for i, (inputs, targets, _) in enumerate(self.train_loader):
+
+                input_org_1 = inputs[0]
+                input_org_2 = inputs[1]
+                target_org = targets
+
+                try:
+                    input_invs, target_invs, boxes = next(weighted_train_loader)
+                except:
+                    weighted_train_loader = iter(self.weighted_train_loader)
+                    input_invs, target_invs, box_inv = next(weighted_train_loader)
+
+                input_invs_1 = input_invs[0][:input_org_1.size()[0]]
+                input_invs_2 = input_invs[1][:input_org_2.size()[0]]
+                box_inv = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+                one_hot_org = torch.zeros(target_org.size(0), self.num_classes).scatter_(1, target_org.view(-1, 1), 1)
+                one_hot_org_w = self.per_cls_weights.cpu() * one_hot_org
+                one_hot_invs = torch.zeros(target_invs.size(0), self.num_classes).scatter_(1, target_invs.view(-1, 1), 1)
+                one_hot_invs = one_hot_invs[:one_hot_org.size()[0]]
+                one_hot_invs_w = self.per_cls_weights.cpu() * one_hot_invs
+
+                # print(f"org1={input_org_1.shape}, {input_org_1.size()[0]}, inv={input_invs[0].shape}, {input_invs_1.shape}," \
+                #        "one_hot_org_w={one_hot_org_w.shape}, one_hot_invs_w={one_hot_invs_w.shape}")
+                input_org_1 = input_org_1.cuda()
+                input_org_2 = input_org_2.cuda()
+                input_invs_1 = input_invs_1.cuda()
+                input_invs_2 = input_invs_2.cuda()
+
+                one_hot_org = one_hot_org.cuda()
+                one_hot_org_w = one_hot_org_w.cuda()
+                one_hot_invs = one_hot_invs.cuda()
+                one_hot_invs_w = one_hot_invs_w.cuda()
+
+                # measure data loading time
+                data_time.update(time.time() - end)
+
+                # Data augmentation
+                lam = np.random.beta(self.beta, self.beta)
+
+                mix_x, cut_x, mixup_y, mixcut_y, mixup_y_w, cutmix_y_w = util.GLMC_mixed_box(org1=input_org_1, org2=input_org_2,
+                                                                                        invs1=input_invs_1,
+                                                                                        invs2=input_invs_2,
+                                                                                        invbox=box_inv,
+                                                                                        label_org=one_hot_org,
+                                                                                        label_invs=one_hot_invs,
+                                                                                        label_org_w=one_hot_org_w,
+                                                                                        label_invs_w=one_hot_invs_w)
+
+
+                output_1, output_cb_1, z1, p1 = self.model(mix_x, train=True)
+                output_2, output_cb_2, z2, p2 = self.model(cut_x, train=True)
+                contrastive_loss = self.SimSiamLoss(p1, z2) + self.SimSiamLoss(p2, z1)
                 # if i == 0:
                 #     print(f"{len(inputs)}, org1={input_org_1.shape}, org2={input_org_2.shape}")
                 #     print(f"mixup-y={mixup_y}, mixcut-y={mixcut_y}, mixup-y-w={mixup_y_w}, cutmix-y-w={cutmix_y_w}")
@@ -193,7 +325,7 @@ class Trainer(object):
                 'optimizer_state_dict': self.optimizer.state_dict(),
                 'best_acc1':  best_acc1,
             }, is_best, epoch + 1)
-
+                    
     def validate(self,epoch=None):
         batch_time = AverageMeter('Time', ':6.3f')
         top1 = AverageMeter('Acc@1', ':6.2f')

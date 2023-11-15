@@ -7,7 +7,7 @@ from imbalance_data.cifar10Imbanlance import *
 from imbalance_data.dataset_lt_data import *
 import utils.moco_loader as moco_loader
 from utils.randaugment import rand_augment_transform
-
+import numpy as np
 
 class TwoCropTransform:
     """Create two crops of the same image"""
@@ -75,6 +75,33 @@ def rand_bbox(size, lam):
 
     return bbx1, bby1, bbx2, bby2
 
+def guided_bbox(size, box):
+    W = size[2]
+    H = size[3]
+    cut_w = np.ceil(W * (box[2]-box[0])).astype(int)
+    cut_h = np.ceil(H * (box[3]-box[1])).astype(int)
+    # uniform
+    cx = np.random.randint(W - np.ceil(cut_w/2).astype(int))
+    cy = np.random.randint(H - np.ceil(cut_h/2).astype(int))
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = bbx1 + cut_w
+    bby2 = bby1 + cut_h
+
+    x1 = int(W * box[0])
+    y1 = int(H * box[1])
+    x2 = int(W * box[2])
+    y2 = int(H * box[3])
+    if (bbx2 - bbx1) > (x2 - x1):
+        x2 += 1
+    elif (bbx2 - bbx1) < (x2 - x1):
+        x2 -= 1
+    if (bby2 - bby1) > (y2 - y1):
+        y2 += 1
+    elif (bby2 - bby1) < (y2 - y1):
+        y2 -= 1
+    return (bbx1, bby1, bbx2, bby2), (x1, y1, x2, y2)
 
 def get_transform(dataset):
     if dataset == "cifar10":
@@ -200,6 +227,38 @@ def GLMC_mixed(org1, org2, invs1, invs2, label_org, label_invs, label_org_w, lab
     lam_cutmix = lam
     cutmix_y = lam_cutmix * label_org + (1 - lam_cutmix) * label_invs
     cutmix_y_w = lam_cutmix * label_org_w + (1 - lam_cutmix) * label_invs_w
+
+    return mixup_x, org2, mixup_y, cutmix_y, mixup_y_w, cutmix_y_w
+
+def GLMC_mixed_box(org1, org2, invs1, invs2, invbox, label_org, label_invs, label_org_w, label_invs_w, alpha=1):
+    lam = np.random.beta(alpha, alpha)
+
+    # mixup
+    mixup_x = lam * org1 + (1 - lam) * invs1
+    mixup_y = lam * label_org + (1 - lam) * label_invs
+    mixup_y_w = lam * label_org_w + (1 - lam) * label_invs_w
+
+    # cutmix or guided-mix
+    cutmix_y = torch.zeros_like(label_org)
+    cutmix_y_w = torch.zeros_like(label_org_w)
+    bbx1, bby1, bbx2, bby2 = rand_bbox(org2.size(), lam)
+    lam_cutmix = lam
+    for i, box in enumerate(invbox):
+        if np.all(box > 0):
+            box = np.clip(box, 0.0, 1.0)
+            lam_cutmix = 1 - (box[2] - box[0]) * (box[3] - box[1])
+            if lam_cutmix > 0.5: 
+                (bbx1, bby1, bbx2, bby2), (x1, y1, x2, y2) = guided_bbox(org2.size(), box)
+                # print(f" box={box}, ori: {bbx1, bby1, bbx2, bby2}, inv:{x1, y1, x2, y2}")
+                org2[i, :, bbx1:bbx2, bby1:bby2] = invs2[i, :, x1:x2, y1:y2]
+            else:
+                lam_cutmix = lam
+                org2[i, :, bbx1:bbx2, bby1:bby2] = invs2[i, :, bbx1:bbx2, bby1:bby2]    
+        else:    
+            org2[i, :, bbx1:bbx2, bby1:bby2] = invs2[i, :, bbx1:bbx2, bby1:bby2]
+
+        cutmix_y[i] = lam_cutmix * label_org[i] + (1 - lam_cutmix) * label_invs[i]
+        cutmix_y_w[i] = lam_cutmix * label_org_w[i] + (1 - lam_cutmix) * label_invs_w[i]
 
     return mixup_x, org2, mixup_y, cutmix_y, mixup_y_w, cutmix_y_w
 
